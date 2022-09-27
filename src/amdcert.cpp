@@ -19,6 +19,14 @@
 #include "utilities.h"  // reverse_bytes
 #include <cstring>      // memset
 #include <openssl/ts.h> // SHA256_CTX
+#include <openssl/param_build.h> //OPENSSL_PARAM_BLD
+#include <openssl/params.h>
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
+#include <openssl/rsa.h>
+#include <iostream>
+using namespace std;
+
 
 /**
  * If out_str is passed in, fill up the string, else prints to std::out
@@ -123,6 +131,102 @@ bool AMDCert::key_size_is_valid(size_t size)
     return (size == AMD_CERT_KEY_BITS_2K) || (size == AMD_CERT_KEY_BITS_4K);
 }
 
+// SEV_ERROR_CODE AMDCert::amd_cert_validate_sig(const amd_cert *cert,
+//                                               const amd_cert *parent,
+//                                               ePSP_DEVICE_TYPE device_type)
+// {
+//     SEV_ERROR_CODE cmd_ret = ERROR_INVALID_CERTIFICATE;
+//     hmac_sha_256 sha_digest_256;
+//     hmac_sha_512 sha_digest_384;
+//     SHA_TYPE algo = SHA_TYPE_256;
+//     uint8_t *sha_digest = NULL;
+//     size_t sha_length = 0;
+
+//     RSA *rsa_pub_key = NULL;
+//     BIGNUM *modulus = NULL;
+//     BIGNUM *pub_exp = NULL;
+//     EVP_MD_CTX* md_ctx = NULL;
+//     uint32_t sig_len = cert->modulus_size/8;
+
+//     uint32_t digest_len = 0;
+//     uint8_t decrypted[AMD_CERT_KEY_BYTES_4K] = {0}; // TODO wrong length
+//     uint8_t signature[AMD_CERT_KEY_BYTES_4K] = {0};
+//     uint32_t fixed_offset = offsetof(amd_cert, pub_exp);    // 64 bytes
+
+//     do {
+//         if (!cert || !parent) {
+//             cmd_ret = ERROR_INVALID_PARAM;
+//             break;
+//         }
+
+//         // Set SHA_TYPE to 256 bit or 384 bit depending on device_type
+//         if (device_type == PSP_DEVICE_TYPE_NAPLES) {
+//             algo = SHA_TYPE_256;
+//             sha_digest = sha_digest_256;
+//             sha_length = sizeof(hmac_sha_256);
+//         }
+//         else /*if (ROME/MILAN)*/ {
+//             algo = SHA_TYPE_384;
+//             sha_digest = sha_digest_384;
+//             sha_length = sizeof(hmac_sha_512);
+//         }
+
+//         // Memzero all the buffers
+//         memset(sha_digest, 0, sha_length);
+//         memset(decrypted, 0, sizeof(decrypted));
+//         memset(signature, 0, sizeof(signature));
+
+//         // New up the RSA key
+//         rsa_pub_key = RSA_new();
+
+//         // Convert the parent to an RSA key to pass into RSA_verify
+//         modulus = BN_lebin2bn((uint8_t *)&parent->modulus, parent->modulus_size/8, NULL);  // n    // New's up BigNum
+//         pub_exp = BN_lebin2bn((uint8_t *)&parent->pub_exp, parent->pub_exp_size/8, NULL);   // e
+//         if (RSA_set0_key(rsa_pub_key, modulus, pub_exp, NULL) != 1)
+//             break;
+
+//         md_ctx = EVP_MD_CTX_create();
+//         if (EVP_DigestInit(md_ctx, (algo == SHA_TYPE_256) ? EVP_sha256() : EVP_sha384()) <= 0)
+//             break;
+//         if (EVP_DigestUpdate(md_ctx, cert, fixed_offset) <= 0)     // Calls SHA256_UPDATE
+//             break;
+//         if (EVP_DigestUpdate(md_ctx, &cert->pub_exp, cert->pub_exp_size/8) <= 0)
+//             break;
+//         if (EVP_DigestUpdate(md_ctx, &cert->modulus, cert->modulus_size/8) <= 0)
+//             break;
+//         EVP_DigestFinal(md_ctx, sha_digest, &digest_len);
+
+//         // Swap the bytes of the signature
+//         memcpy(signature, &cert->sig, parent->modulus_size/8);
+//         if (!sev::reverse_bytes(signature, parent->modulus_size/8))
+//             break;
+
+//         // Now we will verify the signature. Start by a RAW decrypt of the signature
+//         if (RSA_public_decrypt(sig_len, signature, decrypted, rsa_pub_key, RSA_NO_PADDING) == -1)
+//             break;
+
+//         // Verify the data
+//         // SLen of -2 means salt length is recovered from the signature
+//         if (RSA_verify_PKCS1_PSS(rsa_pub_key, sha_digest,
+//                                 (algo == SHA_TYPE_256) ? EVP_sha256() : EVP_sha384(),
+//                                 decrypted, -2) != 1)
+//         {
+//             break;
+//         }
+
+//         cmd_ret = STATUS_SUCCESS;
+//     } while (0);
+
+//     // Free the keys and contexts
+//     if (rsa_pub_key)
+//         RSA_free(rsa_pub_key);
+
+//     if (md_ctx)
+//         EVP_MD_CTX_free(md_ctx);
+
+//     return cmd_ret;
+// }
+
 SEV_ERROR_CODE AMDCert::amd_cert_validate_sig(const amd_cert *cert,
                                               const amd_cert *parent,
                                               ePSP_DEVICE_TYPE device_type)
@@ -134,14 +238,18 @@ SEV_ERROR_CODE AMDCert::amd_cert_validate_sig(const amd_cert *cert,
     uint8_t *sha_digest = NULL;
     size_t sha_length = 0;
 
-    RSA *rsa_pub_key = NULL;
-    BIGNUM *modulus = NULL;
-    BIGNUM *pub_exp = NULL;
-    EVP_MD_CTX* md_ctx = NULL;
-    uint32_t sig_len = cert->modulus_size/8;
+    EVP_PKEY *rsa_pub_key = EVP_PKEY_new();
 
-    uint32_t digest_len = 0;
-    uint8_t decrypted[AMD_CERT_KEY_BYTES_4K] = {0}; // TODO wrong length
+    BIGNUM *modulus = NULL;
+   
+    BIGNUM *pub_exp = NULL;
+    
+    EVP_PKEY_CTX *key_gen_ctx = NULL;
+    uint32_t sig_len = cert->modulus_size/8;
+    EVP_MD_CTX* verify_md_ctx;
+    EVP_PKEY_CTX *verify_ctx;
+
+    
     uint8_t signature[AMD_CERT_KEY_BYTES_4K] = {0};
     uint32_t fixed_offset = offsetof(amd_cert, pub_exp);    // 64 bytes
 
@@ -165,56 +273,121 @@ SEV_ERROR_CODE AMDCert::amd_cert_validate_sig(const amd_cert *cert,
 
         // Memzero all the buffers
         memset(sha_digest, 0, sha_length);
-        memset(decrypted, 0, sizeof(decrypted));
         memset(signature, 0, sizeof(signature));
-
-        // New up the RSA key
-        rsa_pub_key = RSA_new();
 
         // Convert the parent to an RSA key to pass into RSA_verify
         modulus = BN_lebin2bn((uint8_t *)&parent->modulus, parent->modulus_size/8, NULL);  // n    // New's up BigNum
         pub_exp = BN_lebin2bn((uint8_t *)&parent->pub_exp, parent->pub_exp_size/8, NULL);   // e
-        if (RSA_set0_key(rsa_pub_key, modulus, pub_exp, NULL) != 1)
-            break;
+        
 
-        md_ctx = EVP_MD_CTX_create();
-        if (EVP_DigestInit(md_ctx, (algo == SHA_TYPE_256) ? EVP_sha256() : EVP_sha384()) <= 0)
-            break;
-        if (EVP_DigestUpdate(md_ctx, cert, fixed_offset) <= 0)     // Calls SHA256_UPDATE
-            break;
-        if (EVP_DigestUpdate(md_ctx, &cert->pub_exp, cert->pub_exp_size/8) <= 0)
-            break;
-        if (EVP_DigestUpdate(md_ctx, &cert->modulus, cert->modulus_size/8) <= 0)
-            break;
-        EVP_DigestFinal(md_ctx, sha_digest, &digest_len);
+        OSSL_PARAM_BLD *params_build = OSSL_PARAM_BLD_new();
+        if ( params_build == NULL ) {
+            cout << "Init fails " << endl;
+        }
 
-        // Swap the bytes of the signature
+        
+        if ( !OSSL_PARAM_BLD_push_BN(params_build, "n", modulus) ) {
+            cout << "Error: failed to push modulus into param build." << endl;
+            break;
+        }
+
+        
+        if ( !OSSL_PARAM_BLD_push_BN(params_build, "e", pub_exp) ) {
+            cout << "Error: failed to push exponent into param build." << endl;
+            break;
+        }
+        
+        OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(params_build);
+        if ( params == NULL ) {
+            cout << "Error: building parameters." << endl;
+            break;
+        }
+        OSSL_PARAM_BLD_free(params_build);
+        
+        key_gen_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+
+        if(EVP_PKEY_fromdata_init(key_gen_ctx) != 1) {
+            cout << "failed to initialize key creation." << endl;
+            break;
+        }
+
+        if(EVP_PKEY_fromdata(key_gen_ctx, &rsa_pub_key, EVP_PKEY_PUBLIC_KEY, params) != 1) {
+            cout << "key generation breaks" << endl;
+            break;
+        }
+
+        if (EVP_PKEY_get_base_id(rsa_pub_key) != EVP_PKEY_RSA) {
+            cout << "wrong key type" << endl;
+            break;
+        }
+
+        OSSL_PARAM_free(params);
+
         memcpy(signature, &cert->sig, parent->modulus_size/8);
+
         if (!sev::reverse_bytes(signature, parent->modulus_size/8))
             break;
+        
+        verify_md_ctx = EVP_MD_CTX_new();
 
-        // Now we will verify the signature. Start by a RAW decrypt of the signature
-        if (RSA_public_decrypt(sig_len, signature, decrypted, rsa_pub_key, RSA_NO_PADDING) == -1)
+        verify_ctx = EVP_PKEY_CTX_new_from_pkey(NULL, rsa_pub_key, NULL);
+
+        if (!verify_md_ctx) {
+            cout << "Error md verify context " << endl;;
+            break;
+        }
+
+        if (!verify_ctx) {
+            cout << "Error verify context " << endl;;
+            break;
+        }
+
+        if (EVP_DigestVerifyInit(verify_md_ctx, &verify_ctx, (algo == SHA_TYPE_256) ? EVP_sha256() : EVP_sha384(), NULL, rsa_pub_key) <= 0) {
+            cout << "Init fails " << endl;
+            break;
+        }
+        
+        int padding_ret = (EVP_PKEY_CTX_set_rsa_padding(verify_ctx, RSA_PKCS1_PSS_PADDING));
+        if (padding_ret <= 0 && padding_ret == -2) {
+            cout << "operation is not supported by the public key algorithm." << endl;
+            break;
+        } else if (padding_ret <= 0) {
+            cout << "set padding fails" << endl;
+            break;
+        }
+
+        if (EVP_PKEY_CTX_set_rsa_pss_saltlen(verify_ctx, -2 /* salt len = hash len */) < 0) {
+            cout << "set saltlen fails" << endl;
+            break;
+        }
+
+        if (EVP_DigestVerifyUpdate(verify_md_ctx, cert, fixed_offset) <= 0)     // Calls SHA256_UPDATE
+            break;
+        if (EVP_DigestVerifyUpdate(verify_md_ctx, &cert->pub_exp, cert->pub_exp_size/8) <= 0)
+            break;
+        if (EVP_DigestVerifyUpdate(verify_md_ctx, &cert->modulus, cert->modulus_size/8) <= 0)
             break;
 
-        // Verify the data
-        // SLen of -2 means salt length is recovered from the signature
-        if (RSA_verify_PKCS1_PSS(rsa_pub_key, sha_digest,
-                                (algo == SHA_TYPE_256) ? EVP_sha256() : EVP_sha384(),
-                                decrypted, -2) != 1)
-        {
+        int ret = EVP_DigestVerifyFinal(verify_md_ctx,signature,sig_len);
+        if (ret == 0) {
+            cout << "Verify digest fails" << endl;
+            break; 
+        } else if (ret < 0) {
+            cout << "Verify error" << endl;
             break;
         }
 
         cmd_ret = STATUS_SUCCESS;
-    } while (0);
+    } 
+    while (0);
 
     // Free the keys and contexts
     if (rsa_pub_key)
-        RSA_free(rsa_pub_key);
-
-    if (md_ctx)
-        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(rsa_pub_key);
+    if (key_gen_ctx)
+        EVP_PKEY_CTX_free(key_gen_ctx);
+    if (verify_md_ctx)
+        EVP_MD_CTX_free(verify_md_ctx);
 
     return cmd_ret;
 }
