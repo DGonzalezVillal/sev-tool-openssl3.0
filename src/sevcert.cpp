@@ -29,8 +29,14 @@
 #include <openssl/core_names.h>
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
+#include <openssl/err.h>
 #include <cstring>      // memset
 #include <fstream>
+#include <iterator>
+#include <algorithm>
+#include <vector>
+#include <iostream>
+#include <array>
 #include <stdio.h>
 #include <stdexcept>
 
@@ -547,34 +553,34 @@ SEV_ERROR_CODE SEVCert::validate_public_key(const sev_cert *cert, const EVP_PKEY
 //     size_t sha_length = 0;
 
 //     do {
-//         //TODO should this be child cert? should prob combine this function anyway
-//         // Determine if SHA_TYPE is 256 bit or 384 bit
-//         if (parent_cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA256 || parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256 ||
-//             parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)
-//         {
-//             sha_type = SHA_TYPE_256;
-//             sha_digest = sha_digest_256;
-//             sha_length = sizeof(hmac_sha_256);
-//         }
-//         else if (parent_cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA384 || parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA384 ||
-//                  parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)
-//         {
-//             sha_type = SHA_TYPE_384;
-//             sha_digest = sha_digest_384;
-//             sha_length = sizeof(hmac_sha_512);
-//         }
-//         else
-//         {
-//             break;
-//         }
+        // //TODO should this be child cert? should prob combine this function anyway
+        // // Determine if SHA_TYPE is 256 bit or 384 bit
+        // if (parent_cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA256 || parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256 ||
+        //     parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)
+        // {
+        //     sha_type = SHA_TYPE_256;
+        //     sha_digest = sha_digest_256;
+        //     sha_length = sizeof(hmac_sha_256);
+        // }
+        // else if (parent_cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA384 || parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA384 ||
+        //          parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)
+        // {
+        //     sha_type = SHA_TYPE_384;
+        //     sha_digest = sha_digest_384;
+        //     sha_length = sizeof(hmac_sha_512);
+        // }
+        // else
+        // {
+        //     break;
+        // }
 
-//         // 1. SHA256 hash the cert from Version through pub_key parameters
-//         // Calculate the digest of the input message   rsa.c -> rsa_pss_verify_msg()
-//         // SHA256/SHA384 hash the cert from the [Version:pub_key] params
-//         uint32_t pub_key_offset = offsetof(sev_cert, sig_1_usage);  // 16 + sizeof(SEV_PUBKEY)
-//         if (!digest_sha((uint8_t *)child_cert, pub_key_offset, sha_digest, sha_length, sha_type)) {
-//             break;
-//         }
+        // // 1. SHA256 hash the cert from Version through pub_key parameters
+        // // Calculate the digest of the input message   rsa.c -> rsa_pss_verify_msg()
+        // // SHA256/SHA384 hash the cert from the [Version:pub_key] params
+        // uint32_t pub_key_offset = offsetof(sev_cert, sig_1_usage);  // 16 + sizeof(SEV_PUBKEY)
+        // if (!digest_sha((uint8_t *)child_cert, pub_key_offset, sha_digest, sha_length, sha_type)) {
+        //     break;
+        // }
 
 //         // 2. Use the pub_key in sig[i] arg to decrypt the sig in child_cert arg
 //         // Try both sigs in child_cert, to see if either of them match. In PEK, CEK and OCA can be in any order
@@ -616,40 +622,40 @@ SEV_ERROR_CODE SEVCert::validate_public_key(const sev_cert *cert, const EVP_PKEY
 //                 RSA_free(rsa_pub_key);
 //                 break;
 //             }
-//             else if ((parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256) ||
-//                      (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA384) ||
-//                      (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)  ||
-//                      (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)) {      // ecdsa.c -> sign_verify_msg
-//                 ECDSA_SIG *tmp_ecdsa_sig = ECDSA_SIG_new();
-//                 BIGNUM *r_big_num = BN_new();
-//                 BIGNUM *s_big_num = BN_new();
+            // else if ((parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256) ||
+            //          (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA384) ||
+            //          (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)  ||
+            //          (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)) {      // ecdsa.c -> sign_verify_msg
+            //     ECDSA_SIG *tmp_ecdsa_sig = ECDSA_SIG_new();
+            //     BIGNUM *r_big_num = BN_new();
+            //     BIGNUM *s_big_num = BN_new();
 
-//                 // Store the x and y components as separate BIGNUM objects. The values in the
-//                 // SEV certificate are little-endian, must reverse bytes before storing in BIGNUM
-//                 r_big_num = BN_lebin2bn(cert_sig[i].ecdsa.r, sizeof(sev_ecdsa_sig::r), r_big_num);    // LE to BE
-//                 s_big_num = BN_lebin2bn(cert_sig[i].ecdsa.s, sizeof(sev_ecdsa_sig::s), s_big_num);
+            //     // Store the x and y components as separate BIGNUM objects. The values in the
+            //     // SEV certificate are little-endian, must reverse bytes before storing in BIGNUM
+            //     r_big_num = BN_lebin2bn(cert_sig[i].ecdsa.r, sizeof(sev_ecdsa_sig::r), r_big_num);    // LE to BE
+            //     s_big_num = BN_lebin2bn(cert_sig[i].ecdsa.s, sizeof(sev_ecdsa_sig::s), s_big_num);
 
-//                 // Calling ECDSA_SIG_set0() transfers the memory management of the values to
-//                 // the ECDSA_SIG object, and therefore the values that have been passed
-//                 // in should not be freed directly after this function has been called
-//                 if (ECDSA_SIG_set0(tmp_ecdsa_sig, r_big_num, s_big_num) != 1) {
-//                     BN_free(s_big_num);                   // Frees BIGNUMs manually here
-//                     BN_free(r_big_num);
-//                     ECDSA_SIG_free(tmp_ecdsa_sig);
-//                     continue;
-//                 }
-//                 EC_KEY *tmp_ec_key = EVP_PKEY_get1_EC_KEY(parent_signing_key); // Make a local key so you can free it later
-                // if (ECDSA_do_verify(sha_digest, (uint32_t)sha_length, tmp_ecdsa_sig, tmp_ec_key) != 1) {
-                //     EC_KEY_free(tmp_ec_key);
-                //     ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
-                //     continue;
-                // }
+            //     // Calling ECDSA_SIG_set0() transfers the memory management of the values to
+            //     // the ECDSA_SIG object, and therefore the values that have been passed
+            //     // in should not be freed directly after this function has been called
+            //     if (ECDSA_SIG_set0(tmp_ecdsa_sig, r_big_num, s_big_num) != 1) {
+            //         BN_free(s_big_num);                   // Frees BIGNUMs manually here
+            //         BN_free(r_big_num);
+            //         ECDSA_SIG_free(tmp_ecdsa_sig);
+            //         continue;
+            //     }
+            //     EC_KEY *tmp_ec_key = EVP_PKEY_get1_EC_KEY(parent_signing_key); // Make a local key so you can free it later
+            //     if (ECDSA_do_verify(sha_digest, (uint32_t)sha_length, tmp_ecdsa_sig, tmp_ec_key) != 1) {
+            //         EC_KEY_free(tmp_ec_key);
+            //         ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
+            //         continue;
+            //     }
 
-//                 found_match = true;
-//                 EC_KEY_free(tmp_ec_key);
-//                 ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
-//                 break;
-//             }
+            //     found_match = true;
+            //     EC_KEY_free(tmp_ec_key);
+            //     ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
+            //     break;
+            // }
 //             else {       // Bad/unsupported signing key algorithm
 //                 printf("Unexpected algorithm! %x\n", parent_cert->pub_key_algo);
 //                 break;
@@ -772,13 +778,13 @@ SEV_ERROR_CODE SEVCert::validate_signature(const sev_cert *child_cert,
                     break;
                 }
 
-                if (EVP_DigestVerifyUpdate(verify_md_ctx, child_cert, pub_key_offset) <= 0)     // Calls SHA256_UPDATE
+                if (EVP_DigestVerifyUpdate(verify_md_ctx, (uint8_t *)child_cert, pub_key_offset) <= 0)     // Calls SHA256_UPDATE
                     break;
 
                 int ret = EVP_DigestVerifyFinal(verify_md_ctx,signature,sig_len);
                 if (ret == 0) {
                     cout << "RSA Verify digest fails" << endl;
-                    break; 
+                    continue; 
                 } else if (ret < 0) {
                     cout << "RSA Verify error" << endl;
                     break;
@@ -798,92 +804,67 @@ SEV_ERROR_CODE SEVCert::validate_signature(const sev_cert *child_cert,
                      (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)  ||
                      (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)) {      // ecdsa.c -> sign_verify_msg
                 
-                uint32_t sig_len = EVP_PKEY_size(parent_signing_key);
-                uint8_t signature[sig_len] = {0};
-                // Swap the bytes of the signature
-                memcpy(signature, &cert_sig[i].ecdsa, sig_len/8);
-                
-                if (!sev::reverse_bytes(signature, sig_len/8)) {
-                    cout << "bit reversing fails" << endl;
+                ECDSA_SIG *tmp_ecdsa_sig = ECDSA_SIG_new();
+                BIGNUM *r_big_num = BN_new();
+                BIGNUM *s_big_num = BN_new();
+                uint32_t sig_len;
+                unsigned char* der_sig = NULL;;
+
+                // Store the x and y components as separate BIGNUM objects. The values in the
+                // SEV certificate are little-endian, must reverse bytes before storing in BIGNUM
+                r_big_num = BN_lebin2bn(cert_sig[i].ecdsa.r, sizeof(sev_ecdsa_sig::r), r_big_num);    // LE to BE
+                s_big_num = BN_lebin2bn(cert_sig[i].ecdsa.s, sizeof(sev_ecdsa_sig::s), s_big_num);
+
+                // Calling ECDSA_SIG_set0() transfers the memory management of the values to
+                // the ECDSA_SIG object, and therefore the values that have been passed
+                // in should not be freed directly after this function has been called
+                if (ECDSA_SIG_set0(tmp_ecdsa_sig, r_big_num,s_big_num) != 1) {
+                    BN_free(s_big_num); // FreesBIGNUMs manually here
+                    BN_free(r_big_num);
+                    ECDSA_SIG_free(tmp_ecdsa_sig);
                     break;
                 }
 
-                // ECDSA_SIG *tmp_ecdsa_sig = ECDSA_SIG_new();
-                // BIGNUM *r_big_num = BN_new();
-                // BIGNUM *s_big_num = BN_new();
-
-                // // Store the x and y components as separate BIGNUM objects. The values in the
-                // // SEV certificate are little-endian, must reverse bytes before storing in BIGNUM
-                // r_big_num = BN_lebin2bn(cert_sig[i].ecdsa.r, sizeof(sev_ecdsa_sig::r), r_big_num);    // LE to BE
-                // s_big_num = BN_lebin2bn(cert_sig[i].ecdsa.s, sizeof(sev_ecdsa_sig::s), s_big_num);
-
-                // // Calling ECDSA_SIG_set0() transfers the memory management of the values to
-                // // the ECDSA_SIG object, and therefore the values that have been passed
-                // // in should not be freed directly after this function has been called
-                // if (ECDSA_SIG_set0(tmp_ecdsa_sig, r_big_num, s_big_num) != 1) {
-                //     BN_free(s_big_num);                   // Frees BIGNUMs manually here
-                //     BN_free(r_big_num);
-                //     ECDSA_SIG_free(tmp_ecdsa_sig);
-                //     continue;
-                // }
+                int der_sig_len = i2d_ECDSA_SIG(tmp_ecdsa_sig, &der_sig);
+                // der_sig = static_cast<unsigned char*>(OPENSSL_malloc(der_sig_len));
+                // unsigned char* der_iter = der_sig;
+                // der_sig_len = i2d_ECDSA_SIG(tmp_ecdsa_sig, &der_iter); // <= bugfix here
 
 
+                if (der_sig_len == 0) {
+                    cout << "sig length invalid" << endl;
+                    break;
+                }
 
-                // EC_KEY *tmp_ec_key = EVP_PKEY_get1_EC_KEY(parent_signing_key); // Make a local key so you can free it later
-                // sig_len = ECDSA_size(tmp_ec_key);
-                // if (ECDSA_do_verify(sha_digest, (uint32_t)sha_length, tmp_ecdsa_sig, tmp_ec_key) != 1) {
-                //     EC_KEY_free(tmp_ec_key);
-                //     ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
-                //     continue;
-                // }
-
-                // found_match = true;
-                // EC_KEY_free(tmp_ec_key);
-                // ECDSA_SIG_free(tmp_ecdsa_sig);      // Frees BIGNUMs too
+                if (der_sig == NULL) {
+                    cout << "sig generation failed" << endl;
+                    break;
+                }
 
                 verify_md_ctx = EVP_MD_CTX_new();
 
-                // verify_ctx = EVP_PKEY_CTX_new_from_pkey(NULL, parent_signing_key, NULL);
 
                 if (!verify_md_ctx) {
                     cout << "Error md verify context " << endl;;
                     break;
                 }
 
-                // if (!verify_ctx) {
-                //     cout << "Error verify context " << endl;;
-                //     break;
-                // }
-
-                if (EVP_DigestVerifyInit(verify_md_ctx, NULL, (parent_cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA256) ? EVP_sha256() : EVP_sha384(), NULL, parent_signing_key) <= 0) {
+                if (EVP_DigestVerifyInit(verify_md_ctx, NULL, (parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256 || parent_cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256) ? EVP_sha256(): EVP_sha384(), NULL, parent_signing_key) <= 0) {
                     cout << "Init fails " << endl;
                     break;
                 }
-        
-                // int padding_ret = (EVP_PKEY_CTX_set_rsa_padding(verify_ctx, RSA_PKCS1_PSS_PADDING));
-                // if (padding_ret <= 0 && padding_ret == -2) {
-                //     cout << "operation is not supported by the public key algorithm." << endl;
-                //     break;
-                // } else if (padding_ret <= 0) {
-                //     cout << "set padding fails" << endl;
-                //     break;
-                // }
 
-                // if (EVP_PKEY_CTX_set_rsa_pss_saltlen(verify_ctx, -2 /* salt len = hash len */) < 0) {
-                //     cout << "set saltlen fails" << endl;
-                //     break;
-                // }
-
-                if (EVP_DigestVerifyUpdate(verify_md_ctx, child_cert, pub_key_offset) <= 0){    // Calls SHA256_UPDATE
+                if (EVP_DigestVerifyUpdate(verify_md_ctx, (uint8_t *)child_cert, pub_key_offset) <= 0){    // Calls SHA256_UPDATE
                     cout << "updating digest fails" << endl;
                     break;
                 }
 
-                int ret = EVP_DigestVerifyFinal(verify_md_ctx,signature,sig_len);
+                int ret = EVP_DigestVerifyFinal(verify_md_ctx, der_sig, der_sig_len);
                 if (ret == 0) {
                     cout << "EC Verify digest fails" << endl;
-                    break; 
+                    continue;
                 } else if (ret < 0) {
+                    printf("Failed Final Verify %s\n",ERR_error_string(ERR_get_error(),NULL));
                     cout << "EC Verify error" << endl;
                     break;
                 }
@@ -1062,6 +1043,11 @@ SEV_ERROR_CODE SEVCert::compile_public_key_from_certificate(const sev_cert *cert
     BIGNUM *y_big_num = NULL;
     BIGNUM *modulus = NULL;
     BIGNUM *pub_exp = NULL;
+    int ec_group_order = 48;
+    unsigned char px[ec_group_order] = { 0 };
+    unsigned char py[ec_group_order] = { 0 };
+    
+
 
     do {
         if ((cert->pub_key_algo == SEV_SIG_ALGO_RSA_SHA256) ||
@@ -1145,20 +1131,50 @@ SEV_ERROR_CODE SEVCert::compile_public_key_from_certificate(const sev_cert *cert
                  (cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)  ||
                  (cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384) ) {      // ecdsa.c -> sign_verify_msg
 
-            // Store the x and y components as separate BIGNUM objects. The values in the
-            // SEV certificate are little-endian, must reverse bytes before storing in BIGNUM
+            // SEV certificate are little-endian, must reverse bytes before generating key
             if ((cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA256) ||
                 (cert->pub_key_algo == SEV_SIG_ALGO_ECDSA_SHA384)) {
-                x_big_num = BN_lebin2bn(cert->pub_key.ecdsa.qx, sizeof(cert->pub_key.ecdsa.qx), NULL);  // New's up BigNum
-                y_big_num = BN_lebin2bn(cert->pub_key.ecdsa.qy, sizeof(cert->pub_key.ecdsa.qy), NULL);
+                // x_big_num = BN_lebin2bn(cert->pub_key.ecdsa.qx, sizeof(cert->pub_key.ecdsa.qx), NULL);  // New's up BigNum
+                //Grab x param and flip bytes to BE
+                memcpy(px, &cert->pub_key.ecdsa.qx, ec_group_order);
+                if(!sev::reverse_bytes(px, sizeof(px)))
+                    break;
+                // y_big_num = BN_lebin2bn(cert->pub_key.ecdsa.qy, sizeof(cert->pub_key.ecdsa.qy), NULL);
+                //Grab y param and flip bytes to BE
+                memcpy(py, &cert->pub_key.ecdsa.qy, ec_group_order);
+                if(!sev::reverse_bytes(py, sizeof(py)))
+                    break;
             }
             else if ((cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA256)  ||
                     (cert->pub_key_algo == SEV_SIG_ALGO_ECDH_SHA384)) {
-                x_big_num = BN_lebin2bn(cert->pub_key.ecdh.qx, sizeof(cert->pub_key.ecdh.qx), NULL);  // New's up BigNum
-                y_big_num = BN_lebin2bn(cert->pub_key.ecdh.qy, sizeof(cert->pub_key.ecdh.qy), NULL);
+                // x_big_num = BN_lebin2bn(cert->pub_key.ecdh.qx, sizeof(cert->pub_key.ecdh.qx), NULL);  // New's up BigNum
+                //Grab x param and flip bytes to BE
+                memcpy(px, &cert->pub_key.ecdh.qx, ec_group_order);
+                if(!sev::reverse_bytes(px, sizeof(px)))
+                    break;
+                // y_big_num = BN_lebin2bn(cert->pub_key.ecdh.qy, sizeof(cert->pub_key.ecdh.qy), NULL);
+                //Grab y param and flip bytes to BE
+                memcpy(py, &cert->pub_key.ecdh.qy, ec_group_order);
+                if(!sev::reverse_bytes(py, sizeof(py)))
+                    break;
             }
 
-            int nid = EC_curve_nist2nid("P-384");   // NID_secp384r1
+            int px_size = sizeof(px)/sizeof(*px);
+            int py_size = sizeof(py)/sizeof(*py);
+
+
+            // Will contain x and y components
+            unsigned char public_key_xy[1 + px_size + py_size] = { 0 };
+
+            //Add point conversion as first value
+            public_key_xy[0] = POINT_CONVERSION_UNCOMPRESSED;
+
+            //Add x components after point compression
+            memcpy(public_key_xy + 1, px, px_size);
+            //Add y components after x
+            memcpy(public_key_xy + px_size + 1, py, py_size);
+            
+            // int nid = EC_curve_nist2nid("P-384");   // NID_secp384r1
 
             OSSL_PARAM_BLD *params_build = OSSL_PARAM_BLD_new();
 
@@ -1172,14 +1188,8 @@ SEV_ERROR_CODE SEVCert::compile_public_key_from_certificate(const sev_cert *cert
                 break;
             }
 
-            if (!OSSL_PARAM_BLD_push_BN(params_build, OSSL_PKEY_PARAM_EC_PUB_X, x_big_num)) {
-                cout << "Error: failed to push qx into param build." << endl;
-                break;
-            }
-
-        
-            if (!OSSL_PARAM_BLD_push_BN(params_build, OSSL_PKEY_PARAM_EC_PUB_Y, y_big_num)) {
-                cout << "Error: failed to push qy into param build." << endl;
+            if (!OSSL_PARAM_BLD_push_octet_string(params_build, OSSL_PKEY_PARAM_PUB_KEY, public_key_xy, sizeof(public_key_xy))) {
+                cout << "Error: failed to push x and y to param" << endl;
                 break;
             }
         
@@ -1201,6 +1211,7 @@ SEV_ERROR_CODE SEVCert::compile_public_key_from_certificate(const sev_cert *cert
 
             if(EVP_PKEY_fromdata(key_gen_ctx, &evp_pub_key, EVP_PKEY_PUBLIC_KEY, params) != 1) {
                 cout << "key generation breaks" << endl;
+                printf("Failed Final Verify %s\n",ERR_error_string(ERR_get_error(),NULL));
                 break;
             }
 
@@ -1208,25 +1219,6 @@ SEV_ERROR_CODE SEVCert::compile_public_key_from_certificate(const sev_cert *cert
                 cout << "wrong key type" << endl;
                 break;
             }
-
-            // // Create/allocate memory for an EC_KEY object using the NID above
-            // if (!(ec_pub_key = EC_KEY_new_by_curve_name(nid)))
-            //     break;
-            // // Store the x and y coordinates of the public key
-            // if (EC_KEY_set_public_key_affine_coordinates(ec_pub_key, x_big_num, y_big_num) != 1)
-            //     break;
-            // // Make sure the key is good
-            // if (EC_KEY_check_key(ec_pub_key) != 1)
-            //     break;
-
-            /*
-             * Create a public EVP_PKEY from the public EC_KEY
-             * This function links evp_pub_key to ec_pub_key, so when evp_pub_key
-             *  is freed, ec_pub_key is freed. We don't want the user to have to
-             *  manage 2 keys, so just return EVP_PKEY and make sure user free's it
-             */
-            // if (EVP_PKEY_assign_EC_KEY(evp_pub_key, ec_pub_key) != 1)
-            //     break;
         }
 
         if (!evp_pub_key) {
